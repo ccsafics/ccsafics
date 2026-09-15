@@ -755,7 +755,6 @@ async function loadPublicMessages(){
   try{
     const snap = await messagesRef()
       .where('status','==','answered')
-      .where('archived','==',false)
       .orderBy('answeredAt','desc')
       .get();
     messages = snap.docs.map(d => d.data());
@@ -768,14 +767,6 @@ async function loadAdminMessages(){
   try{
     const snap = await messagesRef().orderBy('createdAt','desc').get();
     messages = snap.docs.map(d => d.data());
-    // migración silenciosa: a los mensajes viejos que no tengan el
-    // campo "archived" se les agrega en false, para que sigan
-    // apareciendo en la bandeja/respondidos y no en archivados.
-    const sinCampo = messages.filter(m => m.archived === undefined);
-    if(sinCampo.length){
-      sinCampo.forEach(m => { m.archived = false; });
-      await Promise.all(sinCampo.map(m => saveMessage(m)));
-    }
   }catch(e){ console.error('No se pudieron cargar los mensajes (admin):', e); }
 }
 
@@ -934,7 +925,7 @@ document.getElementById('sendBtn').addEventListener('click', async ()=>{
 
   const newMsg = {
     id: uid(), text: text.slice(0,2000), createdAt: Date.now(),
-    status:'pending', adminReply:null, answeredAt:null, archived:false,
+    status:'pending', adminReply:null, answeredAt:null,
     senderDevice: getDeviceId()
   };
   messages.unshift(newMsg);
@@ -961,7 +952,7 @@ document.getElementById('sentModalCloseBtn').addEventListener('click', ()=>{
 /* ---------- HISTORIAL PÚBLICO (feed, sin comentarios) ---------- */
 function renderHistory(){
   const list = document.getElementById('historyList');
-  const answered = messages.filter(m=>m.status==='answered' && !m.archived);
+  const answered = messages.filter(m=>m.status==='answered');
   document.getElementById('answeredCount').textContent = answered.length;
   if(answered.length===0){
     list.innerHTML = `<div class="empty"><span class="big">📪</span>Todavía no hay mensajes respondidos.<br>¡Vuelve pronto!</div>`;
@@ -1108,9 +1099,9 @@ let inboxSortOrder = 'desc'; // 'desc' = más recientes primero, 'asc' = más an
 
 function renderAdmin(){
   if(!isAdmin) return;
-  let pending = messages.filter(m=>m.status==='pending' && !m.archived);
-  const answered = messages.filter(m=>m.status==='answered' && !m.archived);
-  const archived = messages.filter(m=>m.archived);
+  let pending = messages.filter(m=>m.status==='pending');
+  const answered = messages.filter(m=>m.status==='answered');
+  const archived = messages.filter(m=>m.status==='archived');
   document.getElementById('statPending').textContent = pending.length;
   document.getElementById('statAnswered').textContent = answered.length;
 
@@ -1158,7 +1149,8 @@ function renderAdmin(){
     inboxEl.querySelectorAll('.archiveBtn').forEach(b=>{
       b.addEventListener('click', async ()=>{
         const m = messages.find(x=>x.id===b.dataset.id);
-        m.archived = true;
+        m.prevStatus = m.status;
+        m.status = 'archived';
         await saveMessage(m);
         renderAdmin();
       });
@@ -1202,7 +1194,8 @@ function renderAdmin(){
     answeredEl.querySelectorAll('.archiveAnsweredBtn').forEach(b=>{
       b.addEventListener('click', async ()=>{
         const m = messages.find(x=>x.id===b.dataset.id);
-        m.archived = true;
+        m.prevStatus = m.status;
+        m.status = 'archived';
         await saveMessage(m);
         renderAdmin();
         renderHistory();
@@ -1231,7 +1224,7 @@ function renderAdmin(){
   } else {
     archivedEl.innerHTML = archived.map(m=>`
       <div class="inbox-item">
-        <div class="meta">${m.status === 'answered' ? 'Respondido' : 'Sin responder'} · ${fmtDate(m.createdAt)} · solo visible para admins</div>
+        <div class="meta">${m.adminReply ? 'Respondido' : 'Sin responder'} · ${fmtDate(m.createdAt)} · solo visible para admins</div>
         <div class="txt">${esc(m.text)}</div>
         ${m.adminReply ? `<div class="admin-reply">💜 ${esc(m.adminReply)}</div>` : ''}
         <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
@@ -1243,7 +1236,8 @@ function renderAdmin(){
     archivedEl.querySelectorAll('.unarchiveBtn').forEach(b=>{
       b.addEventListener('click', async ()=>{
         const m = messages.find(x=>x.id===b.dataset.id);
-        m.archived = false;
+        m.status = m.prevStatus || (m.adminReply ? 'answered' : 'pending');
+        m.prevStatus = null;
         await saveMessage(m);
         renderAdmin();
         renderHistory();
