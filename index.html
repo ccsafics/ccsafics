@@ -501,6 +501,18 @@
         </div>
         <textarea id="descInput" maxlength="500" style="min-height:100px;" placeholder="Puedes escribir varias líneas o párrafos (Enter para salto de línea)"></textarea>
         <p class="hint" style="margin-top:4px;">Selecciona texto y toca un botón para darle formato.</p>
+        <label class="field-label" style="margin-top:18px;">Etiquetas de las respuestas compartidas</label>
+        <p class="hint" style="margin-top:-4px;">Cómo se identifica a cada uno en el feed y en la imagen para compartir.</p>
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label class="field-label">Mensaje anónimo</label>
+            <input type="text" id="anonLabelInput" maxlength="30" placeholder="Ej: Anónimo">
+          </div>
+          <div style="flex:1;">
+            <label class="field-label">Respuesta del admin</label>
+            <input type="text" id="adminLabelInput" maxlength="30" placeholder="Ej: admin">
+          </div>
+        </div>
         <button class="btn" id="saveProfileBtn" style="margin-top:16px;">Guardar cambios</button>
         <div class="msg-ok" id="profileOk">¡Perfil actualizado! 💜</div>
       </div>
@@ -642,6 +654,8 @@ let profile = {
   sendHint:"Nadie va a saber que lo escribiste, ni siquiera nosotras 🤍 Solo el equipo administrador puede leerlo hasta que sea respondido.",
   sentTitle:"¡Mensaje enviado! 💌",
   sentText:"Tu mensaje anónimo llegó a destino. Nadie sabe que lo mandaste, ni siquiera el equipo administrador va a saber quién sos — solo va a poder leer el mensaje una vez que decida responderlo.",
+  anonLabel:"Anónimo",
+  adminLabel:"admin",
   bg1:"", bg2:"", bg3:"",
   header1:"", header2:"", header3:"",
   headerImage:"", bgImage:"", bgBlur:0
@@ -959,20 +973,22 @@ function renderHistory(){
     return;
   }
   const icon = iconHTML(profile.icon);
+  const anonLabel = esc(profile.anonLabel || 'Anónimo');
+  const adminLabel = esc(profile.adminLabel || 'admin');
   list.innerHTML = answered.map(m=>`
     <div class="post">
       <button class="post-menu-btn shareBtn" data-id="${m.id}" title="Compartir" aria-label="Compartir">${THREE_DOTS_SVG}</button>
       <div class="post-header">
         <div class="post-avatar">${icon}</div>
         <div>
-          <div class="post-name">Anónimo</div>
+          <div class="post-name">${anonLabel}</div>
           <div class="post-date">Enviado ${timeAgo(m.createdAt)}</div>
         </div>
       </div>
       <div class="post-text">${esc(m.text)}</div>
       <div class="admin-reply-wrap">
         <div class="admin-reply">
-          <div class="who">admin:</div>
+          <div class="who">${adminLabel}:</div>
           ${esc(m.adminReply)}
           <div class="post-date" style="margin-top:6px;">Respondido ${timeAgo(m.answeredAt)}</div>
         </div>
@@ -1338,6 +1354,8 @@ function fillProfileForm(){
   updateIconUI();
   document.getElementById('nameInput').value = profile.name || '';
   document.getElementById('descInput').value = profile.description || '';
+  document.getElementById('anonLabelInput').value = profile.anonLabel || 'Anónimo';
+  document.getElementById('adminLabelInput').value = profile.adminLabel || 'admin';
   document.getElementById('sendTitleInput').value = profile.sendTitle || '';
   document.getElementById('sendHintInput').value = profile.sendHint || '';
   document.getElementById('sentTitleInput').value = profile.sentTitle || '';
@@ -1364,6 +1382,8 @@ document.getElementById('saveProfileBtn').addEventListener('click', async ()=>{
   profile.icon = pendingIcon || profile.icon;
   profile.name = document.getElementById('nameInput').value.trim() || profile.name;
   profile.description = document.getElementById('descInput').value.trim();
+  profile.anonLabel = document.getElementById('anonLabelInput').value.trim() || 'Anónimo';
+  profile.adminLabel = document.getElementById('adminLabelInput').value.trim() || 'admin';
   await saveProfile();
   renderProfile();
   renderHistory();
@@ -1529,7 +1549,13 @@ function drawIconCircle(ctx, cx, cy, r, iconImg, iconText){
   ctx.fill();
   ctx.clip();
   if(iconImg){
-    ctx.drawImage(iconImg, cx-r, cy-r, r*2, r*2);
+    // mismo comportamiento que object-fit:cover en la página: recorta
+    // en vez de estirar/deformar la imagen para llenar el círculo.
+    const iw = iconImg.naturalWidth || iconImg.width;
+    const ih = iconImg.naturalHeight || iconImg.height;
+    const scale = Math.max((r*2)/iw, (r*2)/ih);
+    const dw = iw*scale, dh = ih*scale;
+    ctx.drawImage(iconImg, cx-dw/2, cy-dh/2, dw, dh);
   } else {
     ctx.font = `${Math.floor(r*1.15)}px sans-serif`;
     ctx.textAlign = 'center';
@@ -1537,6 +1563,16 @@ function drawIconCircle(ctx, cx, cy, r, iconImg, iconText){
     ctx.fillText(iconText || '🤍', cx, cy+2);
   }
   ctx.restore();
+}
+
+function mixWithWhite(hex, ratio){
+  hex = (hex || '').replace('#','');
+  if(hex.length !== 6) return '#fdeef6';
+  const r = parseInt(hex.substring(0,2),16), g = parseInt(hex.substring(2,4),16), b = parseInt(hex.substring(4,6),16);
+  const nr = Math.round(r + (255-r)*ratio);
+  const ng = Math.round(g + (255-g)*ratio);
+  const nb = Math.round(b + (255-b)*ratio);
+  return `rgb(${nr},${ng},${nb})`;
 }
 
 async function buildShareCanvas(m){
@@ -1583,11 +1619,14 @@ async function buildShareCanvas(m){
   canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  /* fondo degradado: paleta sáfica (blanco, rosa pastel, lila) */
+  /* fondo degradado: usa los mismos colores del encabezado elegidos en la app */
+  const c1 = profile.header1 || DEFAULT_COLORS.header1;
+  const c2 = profile.header2 || DEFAULT_COLORS.header2;
+  const c3 = profile.header3 || DEFAULT_COLORS.header3;
   const bgGrad = ctx.createLinearGradient(0, 0, W, H);
-  bgGrad.addColorStop(0, '#f9b8d4');
-  bgGrad.addColorStop(0.55, '#f3c9e2');
-  bgGrad.addColorStop(1, '#d9c2ec');
+  bgGrad.addColorStop(0, c1);
+  bgGrad.addColorStop(0.55, c2);
+  bgGrad.addColorStop(1, c3);
   ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, W, H);
 
@@ -1612,7 +1651,7 @@ async function buildShareCanvas(m){
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = '#4a2e5c';
   ctx.font = nameFont;
-  ctx.fillText('Anónimo', x + r*2 + 20, y + r - 4);
+  ctx.fillText(profile.anonLabel || 'Anónimo', x + r*2 + 20, y + r - 4);
   ctx.fillStyle = '#c98fae';
   ctx.font = dateFont;
   ctx.fillText(`Enviado ${timeAgo(m.createdAt)}`, x + r*2 + 20, y + r + 22);
@@ -1629,21 +1668,21 @@ async function buildShareCanvas(m){
 
   y += gapBeforeReply;
 
-  /* caja de respuesta del admin: misma letra, tarjeta más chica y compacta */
+  /* caja de respuesta del admin: mismo acento de color elegido en la app */
   const replyBoxY = y;
   const replyBoxH = replyBlockH;
   roundRectPath(ctx, x, replyBoxY, contentW, replyBoxH, 14);
-  ctx.fillStyle = '#fdeef6';
+  ctx.fillStyle = mixWithWhite(c2, 0.88);
   ctx.fill();
   ctx.save();
-  ctx.fillStyle = '#e8639e';
+  ctx.fillStyle = c2;
   ctx.fillRect(x, replyBoxY, 5, replyBoxH);
   ctx.restore();
 
   let ry = replyBoxY + replyPadV + 16;
   ctx.font = replyLabelFont;
-  ctx.fillStyle = '#e8639e';
-  ctx.fillText('admin:', x + 20, ry);
+  ctx.fillStyle = c2;
+  ctx.fillText((profile.adminLabel || 'admin') + ':', x + 20, ry);
   ry += replyLabelH;
 
   ctx.font = replyBodyFont;
