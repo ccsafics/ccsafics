@@ -966,7 +966,7 @@ document.getElementById('sentModalCloseBtn').addEventListener('click', ()=>{
 /* ---------- HISTORIAL PÚBLICO (feed, sin comentarios) ---------- */
 function renderHistory(){
   const list = document.getElementById('historyList');
-  const answered = messages.filter(m=>m.status==='answered');
+  const answered = messages.filter(m=>m.status==='answered').sort((a,b)=> (b.answeredAt||0) - (a.answeredAt||0));
   document.getElementById('answeredCount').textContent = answered.length;
   if(answered.length===0){
     list.innerHTML = `<div class="empty"><span class="big">📪</span>Todavía no hay mensajes respondidos.<br>¡Vuelve pronto!</div>`;
@@ -1619,16 +1619,37 @@ async function buildShareCanvas(m){
   canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  /* fondo degradado: usa los mismos colores del encabezado elegidos en la app */
-  const c1 = profile.header1 || DEFAULT_COLORS.header1;
-  const c2 = profile.header2 || DEFAULT_COLORS.header2;
-  const c3 = profile.header3 || DEFAULT_COLORS.header3;
-  const bgGrad = ctx.createLinearGradient(0, 0, W, H);
-  bgGrad.addColorStop(0, c1);
-  bgGrad.addColorStop(0.55, c2);
-  bgGrad.addColorStop(1, c3);
-  ctx.fillStyle = bgGrad;
-  ctx.fillRect(0, 0, W, H);
+  /* fondo: igual al fondo elegido en la web (imagen o degradado de colores) */
+  const accentColor = profile.header2 || DEFAULT_COLORS.header2;
+  if(profile.bgImage){
+    try{
+      const bgImg = await new Promise((resolve, reject)=>{
+        const img = new Image();
+        img.onload = ()=> resolve(img);
+        img.onerror = reject;
+        img.src = profile.bgImage;
+      });
+      const iw = bgImg.naturalWidth || bgImg.width, ih = bgImg.naturalHeight || bgImg.height;
+      const scale = Math.max(W/iw, H/ih);
+      const dw = iw*scale, dh = ih*scale;
+      if(profile.bgBlur) ctx.filter = `blur(${profile.bgBlur}px)`;
+      ctx.drawImage(bgImg, (W-dw)/2, (H-dh)/2, dw, dh);
+      ctx.filter = 'none';
+    }catch(e){
+      ctx.fillStyle = profile.bg1 || DEFAULT_COLORS.bg1;
+      ctx.fillRect(0, 0, W, H);
+    }
+  } else {
+    const bg1 = profile.bg1 || DEFAULT_COLORS.bg1;
+    const bg2 = profile.bg2 || DEFAULT_COLORS.bg2;
+    const bg3 = profile.bg3 || DEFAULT_COLORS.bg3;
+    const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+    bgGrad.addColorStop(0, bg1);
+    bgGrad.addColorStop(0.5, bg2);
+    bgGrad.addColorStop(1, bg3);
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   /* tarjeta blanca */
   const cardX = OUT_PAD, cardY = OUT_PAD, cardW = W - OUT_PAD*2;
@@ -1672,16 +1693,16 @@ async function buildShareCanvas(m){
   const replyBoxY = y;
   const replyBoxH = replyBlockH;
   roundRectPath(ctx, x, replyBoxY, contentW, replyBoxH, 14);
-  ctx.fillStyle = mixWithWhite(c2, 0.88);
+  ctx.fillStyle = mixWithWhite(accentColor, 0.88);
   ctx.fill();
   ctx.save();
-  ctx.fillStyle = c2;
+  ctx.fillStyle = accentColor;
   ctx.fillRect(x, replyBoxY, 5, replyBoxH);
   ctx.restore();
 
   let ry = replyBoxY + replyPadV + 16;
   ctx.font = replyLabelFont;
-  ctx.fillStyle = c2;
+  ctx.fillStyle = accentColor;
   ctx.fillText((profile.adminLabel || 'admin') + ':', x + 20, ry);
   ry += replyLabelH;
 
